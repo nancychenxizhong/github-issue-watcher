@@ -9,6 +9,7 @@
     "dev": "tsx src/main.ts",
     "html": "tsx src/main.ts watchlist.json --format html --output report.html",
     "scan": "tsx src/main.ts watchlist.json",
+    "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

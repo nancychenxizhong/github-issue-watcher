@@ -59,6 +59,8 @@ The CLI is still useful for testing scanner changes locally:
 
 ```bash
 npm install
+npm test
+npm run typecheck
 npm run scan
 npm run html
 npm run build
@@ -74,6 +76,24 @@ npm run dev
 
 The local scan state is written to `state/issues-state.json` by default. Pass
 `--state path/to/file.json` to use a different state file.
+
+## Testing
+
+The test suite uses Node's built-in test runner:
+
+```bash
+npm test
+```
+
+The focused tests cover:
+
+- config parsing and validation
+- stable GitHub issue request parameters
+- `If-None-Match` / `304 Not Modified` handling
+- pull request filtering
+- updated-at watermark filtering
+- `Link` header pagination
+- persisted scan state load/save behavior
 
 ## Configuration
 
