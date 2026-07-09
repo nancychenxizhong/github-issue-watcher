@@ -1,0 +1,19 @@
+{
+  "name": "github-issue-watcher",
+  "version": "1.0.0",
+  "description": "Daily scanner for critical GitHub issues across your dependency repos",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js watchlist.json",
+    "dev": "tsx src/main.ts",
+    "html": "tsx src/main.ts watchlist.json --format html --output report.html",
+    "scan": "tsx src/main.ts watchlist.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

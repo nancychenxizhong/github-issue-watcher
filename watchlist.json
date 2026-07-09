@@ -1,0 +1,15 @@
+{
+  "repos": [
+    "openai/codex",
+    "anthropics/anthropic-sdk-python",
+    "microsoft/vscode",
+    {
+      "owner": "vercel",
+      "repo": "next.js",
+      "extraKeywords": ["turbopack", "build failure"]
+    }
+  ],
+  "lookbackDays": 1,
+  "minSeverity": 3,
+  "format": "terminal"
+}

@@ -1,0 +1,43 @@
+name: issue-watcher
+
+on:
+  schedule:
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: issue-state-${{ github.run_id }}
+          restore-keys: |
+            issue-state-
+      - run: npm ci
+      - run: npm run build
+      - run: node dist/main.js watchlist.json --format html --output report.html
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: mkdir -p state
+        if: always()
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state
+          key: issue-state-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-watcher-report
+          path: report.html
+          if-no-files-found: ignore

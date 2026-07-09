@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Optional local config for private overrides or tokens.
+config.json
+.env
+
+# Persisted scan state is generated locally or restored from GitHub Actions cache.
+state/
