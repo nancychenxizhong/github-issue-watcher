@@ -25,6 +25,7 @@ jobs:
             issue-state-
       - run: npm ci
       - run: npm test
+      - run: npm run lint
       - run: npm run build
       - run: node dist/main.js watchlist.json --format html --output report.html
         env:

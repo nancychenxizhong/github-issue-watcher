@@ -60,6 +60,7 @@ The CLI is still useful for testing scanner changes locally:
 ```bash
 npm install
 npm test
+npm run lint
 npm run typecheck
 npm run scan
 npm run html
@@ -94,6 +95,13 @@ The focused tests cover:
 - updated-at watermark filtering
 - `Link` header pagination
 - persisted scan state load/save behavior
+
+Pull requests also run the `ci` workflow, which checks:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run lint`
+- `npm run build`
 
 ## Configuration
 

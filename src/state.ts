@@ -62,7 +62,9 @@ export async function loadScanState(statePath: string): Promise<ScanState> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return emptyState();
     }
-    throw new Error(`Failed to load scan state at ${resolved}: ${(err as Error).message}`);
+    throw new Error(`Failed to load scan state at ${resolved}: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
 }
 

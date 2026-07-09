@@ -8,13 +8,18 @@
     "start": "node dist/main.js watchlist.json",
     "dev": "tsx src/main.ts",
     "html": "tsx src/main.ts watchlist.json --format html --output report.html",
+    "lint": "eslint .",
     "scan": "tsx src/main.ts watchlist.json",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.14.0",
+    "eslint": "^10.6.0",
+    "globals": "^17.7.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.63.0"
   }
 }

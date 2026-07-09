@@ -88,10 +88,13 @@ export async function loadConfig(configPath: string): Promise<Config> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
         `Config file not found: ${resolved}\n` +
-          "Copy config.example.json and customize it for your repos."
+          "Copy config.example.json and customize it for your repos.",
+        { cause: err }
       );
     }
-    throw new Error(`Failed to parse config at ${resolved}: ${(err as Error).message}`);
+    throw new Error(`Failed to parse config at ${resolved}: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
 
   if (!Array.isArray(raw.repos) || raw.repos.length === 0) {
