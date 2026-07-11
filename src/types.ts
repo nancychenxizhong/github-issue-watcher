@@ -81,8 +81,18 @@ export interface ReportResult {
   readonly totalScanned: number;
   readonly alertCount: number;
   readonly failureCount: number;
+  readonly repositories: readonly RepoReportSummary[];
   readonly issues: readonly ScoredIssue[];
   readonly failures: readonly ScanFailure[];
+}
+
+export interface RepoReportSummary {
+  readonly owner: string;
+  readonly repo: string;
+  readonly scanned: number;
+  readonly alerts: number;
+  readonly status: "ok" | "failed";
+  readonly error?: string;
 }
 
 export interface ScanFailure {

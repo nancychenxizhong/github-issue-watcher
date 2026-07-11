@@ -12,6 +12,7 @@ import type {
   RepoScanState,
   ReportFormat,
   ReportResult,
+  RepoReportSummary,
   ScanFailure,
   ScanState,
   ScoredIssue,
@@ -179,6 +180,7 @@ async function run(): Promise<void> {
 
   const allScored: ScoredIssue[] = [];
   const failures: ScanFailure[] = [];
+  const scannedByRepo = new Map<string, number>();
   let totalScanned = 0;
 
   for (const watched of config.repos) {
@@ -188,6 +190,7 @@ async function run(): Promise<void> {
     try {
       const scored = await scanRepo(watched, config, scanState, scanStartedAt);
       totalScanned += scored.length;
+      scannedByRepo.set(label, scored.length);
       allScored.push(...scored);
     } catch (err) {
       failures.push({
@@ -205,6 +208,25 @@ async function run(): Promise<void> {
     (s) => s.issue.state === "open" && s.severity >= config.minSeverity
   );
   const ranked = rankIssues(aboveThreshold);
+  const alertsByRepo = new Map<string, number>();
+  for (const issue of ranked) {
+    const key = `${issue.owner}/${issue.repo}`;
+    alertsByRepo.set(key, (alertsByRepo.get(key) ?? 0) + 1);
+  }
+
+  const failureByRepo = new Map(failures.map((failure) => [`${failure.owner}/${failure.repo}`, failure]));
+  const repositories: RepoReportSummary[] = config.repos.map((watched) => {
+    const key = `${watched.owner}/${watched.repo}`;
+    const failure = failureByRepo.get(key);
+    return {
+      owner: watched.owner,
+      repo: watched.repo,
+      scanned: scannedByRepo.get(key) ?? 0,
+      alerts: alertsByRepo.get(key) ?? 0,
+      status: failure ? "failed" : "ok",
+      ...(failure ? { error: failure.error } : {}),
+    };
+  });
 
   const report: ReportResult = {
     generatedAt: new Date().toISOString(),
@@ -212,6 +234,7 @@ async function run(): Promise<void> {
     totalScanned,
     alertCount: ranked.length,
     failureCount: failures.length,
+    repositories,
     issues: ranked,
     failures,
   };
