@@ -6,6 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js watchlist.json",
+    "serve": "tsx src/server.ts watchlist.json",
+    "start:server": "node dist/server.js watchlist.json",
     "dev": "tsx src/main.ts",
     "html": "tsx src/main.ts watchlist.json --format html --output report.html",
     "lint": "eslint .",
