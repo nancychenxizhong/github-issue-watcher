@@ -79,6 +79,10 @@ test("formatHtml renders the triage hierarchy and report context", () => {
   assert.match(html, /data-severity="5"/);
   assert.match(html, /data-repo="openai\/codex"/);
   assert.match(html, /id="resultCount"/);
+
+  const liveHtml = formatHtml(report, { liveEndpoint: "/api/scan" });
+  assert.match(liveHtml, /id="refreshButton"/);
+  assert.match(liveHtml, /data-endpoint="\/api\/scan"/);
 });
 
 test("formatHtml escapes issue content and report failures", () => {

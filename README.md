@@ -20,6 +20,10 @@ about it until late June.
 6. Exits with code 1 if any issue crosses your severity threshold, so the
    scheduled run becomes a visible alert.
 
+The same scanner can also run behind the included local report server. In that
+mode, the browser requests a report from the server; GitHub credentials and
+scan state never go to the browser.
+
 You do not install anything into the repos being watched. A watched repo is just
 an `owner/repo` string in `watchlist.json`.
 
@@ -78,6 +82,31 @@ npm run dev
 The local scan state is written to `state/issues-state.json` by default. Pass
 `--state path/to/file.json` to use a different state file.
 
+### Live local report
+
+To run a real scan and open the report in a browser:
+
+```bash
+export GITHUB_TOKEN=ghp_your_token_here
+npm run serve
+```
+
+Open [http://127.0.0.1:8765/](http://127.0.0.1:8765/). The first page load
+performs a scan. The result is held in memory for subsequent page loads, while
+the existing state file continues to provide ETag and updated-at caching. Use
+the report's **Scan now** control to force a fresh scan.
+
+The server exposes these local endpoints:
+
+- `GET /` returns the live HTML report.
+- `GET /api/report` returns the current cached report as JSON.
+- `POST /api/scan` forces a scan and returns the new report as JSON.
+- `GET /health` returns a simple server health response.
+
+The server binds to `127.0.0.1:8765` by default. Pass `--host`, `--port`, and
+`--state` after `npm run serve --` to change those settings. Do not expose the
+server publicly without adding authentication and HTTPS.
+
 ## Testing
 
 The test suite uses Node's built-in test runner:
@@ -95,6 +124,7 @@ The focused tests cover:
 - updated-at watermark filtering
 - `Link` header pagination
 - persisted scan state load/save behavior
+- live report server routing and scan caching
 
 Pull requests also run the `ci` workflow, which checks:
 
@@ -209,6 +239,8 @@ npm run html
 
 This writes `report.html`, a self-contained page with repo, severity, and search
 filters for the generated scan results.
+
+For a browser report backed by a real scan, use `npm run serve` instead.
 
 ### Linux/macOS cron
 

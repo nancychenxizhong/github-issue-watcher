@@ -289,7 +289,11 @@ function formatRepoHtml(repo: RepoReportSummary): string {
     </button>`;
 }
 
-export function formatHtml(report: ReportResult): string {
+export interface HtmlReportOptions {
+  readonly liveEndpoint?: string;
+}
+
+export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}): string {
   const criticalCount = report.issues.filter((issue) => issue.severity >= 8).length;
   const warningCount = report.issues.filter((issue) => issue.severity >= 5 && issue.severity < 8).length;
   const noticeCount = report.issues.filter((issue) => issue.severity < 5).length;
@@ -300,6 +304,9 @@ export function formatHtml(report: ReportResult): string {
   const issues = report.issues.map(formatIssueHtml).join("\n");
   const failures = report.failures.map(formatFailureHtml).join("\n");
   const embedded = JSON.stringify(report).replaceAll("<", "\\u003c");
+  const liveControls = options.liveEndpoint
+    ? `<button id="refreshButton" class="refresh-button" type="button" data-endpoint="${escapeHtml(options.liveEndpoint)}">Scan now</button>`
+    : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -336,6 +343,9 @@ export function formatHtml(report: ReportResult): string {
     .topbar p { max-width: 680px; margin: 14px 0 0; color: var(--muted); }
     .run-state { display: flex; align-items: center; gap: 10px; padding: 10px 0 10px 18px; border-left: 1px solid var(--line); color: var(--muted); font-size: 13px; white-space: nowrap; }
     .run-state strong { color: var(--ink); }
+    .refresh-button { min-height: 32px; margin-left: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+    .refresh-button:hover { border-color: var(--ink); }
+    .refresh-button:disabled { cursor: wait; opacity: 0.65; }
     .state-mark { width: 9px; height: 9px; border-radius: 50%; background: var(--neutral); }
     .run-state.partial .state-mark { background: var(--clay); }
     .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; padding: 22px 0; border-bottom: 1px solid var(--line); }
@@ -446,6 +456,7 @@ export function formatHtml(report: ReportResult): string {
       <div class="run-state ${report.failureCount > 0 ? "partial" : ""}">
         <span class="state-mark" aria-hidden="true"></span>
         <span><strong>${report.failureCount > 0 ? "Scan needs attention" : "Scan complete"}</strong><br>${report.lookbackDays} day lookback</span>
+        ${liveControls}
       </div>
     </section>
 
@@ -500,6 +511,7 @@ export function formatHtml(report: ReportResult): string {
     const searchFilter = document.querySelector("#searchFilter");
     const cards = Array.from(document.querySelectorAll(".issue"));
     const resultCount = document.querySelector("#resultCount");
+    const refreshButton = document.querySelector("#refreshButton");
     let activeRepo = "";
     let minSeverity = 0;
 
@@ -536,6 +548,21 @@ export function formatHtml(report: ReportResult): string {
     }
 
     searchFilter.addEventListener("input", applyFilters);
+
+    if (refreshButton) {
+      refreshButton.addEventListener("click", async () => {
+        refreshButton.disabled = true;
+        refreshButton.textContent = "Scanning...";
+        try {
+          const response = await fetch(refreshButton.dataset.endpoint, { method: "POST" });
+          if (!response.ok) throw new Error("Scan request failed");
+          window.location.reload();
+        } catch {
+          refreshButton.disabled = false;
+          refreshButton.textContent = "Try again";
+        }
+      });
+    }
   </script>
 </body>
 </html>`;
