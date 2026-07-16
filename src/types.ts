@@ -92,6 +92,7 @@ export interface RepoReportSummary {
   readonly scanned: number;
   readonly alerts: number;
   readonly status: "ok" | "failed";
+  readonly scanStatus: "updated" | "unchanged" | "empty" | "failed";
   readonly error?: string;
 }
 

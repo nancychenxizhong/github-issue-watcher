@@ -28,13 +28,14 @@ const report: ReportResult = {
   alertCount: 1,
   failureCount: 1,
   repositories: [
-    { owner: "openai", repo: "codex", scanned: 12, alerts: 1, status: "ok" },
+    { owner: "openai", repo: "codex", scanned: 12, alerts: 1, status: "ok", scanStatus: "updated" },
     {
       owner: "anthropics",
       repo: "anthropic-sdk-python",
       scanned: 0,
       alerts: 0,
       status: "failed",
+      scanStatus: "failed",
       error: "GitHub API error: 503 Service Unavailable",
     },
   ],
@@ -78,6 +79,9 @@ test("formatHtml renders the triage hierarchy and report context", () => {
   assert.match(html, /data-severity="8"/);
   assert.match(html, /data-severity="5"/);
   assert.match(html, /data-repo="openai\/codex"/);
+  assert.match(html, /data-change="changed"/);
+  assert.match(html, /data-change-filter="new"/);
+  assert.match(html, /data-change-filter="changed"/);
   assert.match(html, /id="resultCount"/);
 
   const liveHtml = formatHtml(report, { liveEndpoint: "/api/scan" });

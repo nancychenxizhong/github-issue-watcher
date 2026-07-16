@@ -96,6 +96,10 @@ performs a scan. The result is held in memory for subsequent page loads, while
 the existing state file continues to provide ETag and updated-at caching. Use
 the report's **Scan now** control to force a fresh scan.
 
+The repository rail distinguishes a fresh update, an unchanged ETag response,
+an empty scan window, and an unavailable repository. The issue toolbar also
+supports filtering by severity and by lifecycle: New, Changed, or All.
+
 The server exposes these local endpoints:
 
 - `GET /` returns the live HTML report.
@@ -125,6 +129,8 @@ The focused tests cover:
 - `Link` header pagination
 - persisted scan state load/save behavior
 - live report server routing and scan caching
+- bounded scoring evidence and overlapping keyword suppression
+- cached severity comparisons and New/Changed issue filtering
 
 Pull requests also run the `ci` workflow, which checks:
 
@@ -218,6 +224,12 @@ Issues are scored by a weighted combination of signals:
 | Reactions (+1)      | 0.1/ea | Capped at 5 points                        |
 | Comments            | 0.15/ea| Capped at 4 points                        |
 | Recency boost       | 1.0    | Issues created in last 48 hours           |
+
+Keyword and label evidence uses case-insensitive term boundaries. Overlapping
+matches prefer the longer phrase, so `memory leak` does not also count the
+generic `leak` term. Each configured term contributes at most once per issue.
+Repository-specific `extraKeywords` are currently treated as critical keyword
+evidence.
 
 The default threshold (`minSeverity: 3`) catches a single critical keyword or
 label match. Raise it if you're watching noisy repos.

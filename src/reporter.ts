@@ -220,9 +220,16 @@ function formatSeverityDelta(scored: ScoredIssue): string {
   return `<span class="change ${direction}">${sign}${delta} since last scan</span>`;
 }
 
+function issueChangeKind(scored: ScoredIssue): "new" | "changed" | "steady" {
+  if (scored.previousSeverity === undefined) return "new";
+  const delta = Math.round((scored.severity - scored.previousSeverity) * 100) / 100;
+  return delta === 0 ? "steady" : "changed";
+}
+
 function formatIssueHtml(scored: ScoredIssue): string {
   const { owner, repo, issue, severity, breakdown } = scored;
   const level = severityClass(severity);
+  const changeKind = issueChangeKind(scored);
   const keywords = breakdown.keywordHits
     .map((hit) => `<span class="signal keyword">${escapeHtml(hit)}</span>`)
     .join("");
@@ -236,7 +243,7 @@ function formatIssueHtml(scored: ScoredIssue): string {
   ].filter(Boolean);
 
   return `
-    <article class="issue ${level}" data-repo="${escapeHtml(`${owner}/${repo}`)}" data-severity="${severity}" data-search="${escapeHtml(
+    <article class="issue ${level}" data-repo="${escapeHtml(`${owner}/${repo}`)}" data-severity="${severity}" data-change="${changeKind}" data-search="${escapeHtml(
       `${owner}/${repo} ${issue.title} ${breakdown.keywordHits.join(" ")} ${breakdown.labelHits.join(" ")}`
     )}">
       <div class="issue-layout">
@@ -278,7 +285,13 @@ function formatFailureHtml(failure: ScanFailure): string {
 
 function formatRepoHtml(repo: RepoReportSummary): string {
   const key = `${repo.owner}/${repo.repo}`;
-  const status = repo.status === "failed" ? "Unavailable" : `${repo.alerts} alert${repo.alerts === 1 ? "" : "s"}`;
+  const status = repo.status === "failed"
+    ? "Unavailable"
+    : repo.scanStatus === "unchanged"
+      ? `Unchanged: ${repo.alerts} alert${repo.alerts === 1 ? "" : "s"}`
+      : repo.scanStatus === "empty"
+        ? "No issues in window"
+        : `${repo.alerts} alert${repo.alerts === 1 ? "" : "s"}`;
   return `
     <button class="repo-item ${repo.status === "failed" ? "failed" : ""}" type="button" data-repo="${escapeHtml(key)}" aria-pressed="false">
       <span>
@@ -371,6 +384,7 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
     .failure-item strong { color: var(--ink); }
     .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px; margin-bottom: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
     .filter-group { display: flex; gap: 4px; }
+    .filter-group + .filter-group { padding-left: 12px; border-left: 1px solid var(--line); }
     .filter-button { min-height: 34px; padding: 0 12px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; }
     .filter-button:hover { color: var(--ink); }
     .filter-button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--surface); }
@@ -489,6 +503,11 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
             <button class="filter-button" type="button" data-severity="8" aria-pressed="false">Critical</button>
             <button class="filter-button" type="button" data-severity="5" aria-pressed="false">Warning</button>
           </div>
+          <div class="filter-group" role="group" aria-label="Filter by change">
+            <button class="filter-button" type="button" data-change-filter="all" aria-pressed="true">All</button>
+            <button class="filter-button" type="button" data-change-filter="new" aria-pressed="false">New</button>
+            <button class="filter-button" type="button" data-change-filter="changed" aria-pressed="false">Changed</button>
+          </div>
           <label class="search-field" for="searchFilter"><span>Search</span><input id="searchFilter" type="search" placeholder="Title, repo, keyword, or label"></label>
           <span class="result-count" id="resultCount">Showing ${report.alertCount} signal${report.alertCount === 1 ? "" : "s"}</span>
         </section>
@@ -507,13 +526,15 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
   <script id="report-data" type="application/json">${embedded}</script>
   <script>
     const repoButtons = Array.from(document.querySelectorAll(".repo-item"));
-    const severityButtons = Array.from(document.querySelectorAll(".filter-button"));
+    const severityButtons = Array.from(document.querySelectorAll(".filter-button[data-severity]"));
+    const changeButtons = Array.from(document.querySelectorAll(".filter-button[data-change-filter]"));
     const searchFilter = document.querySelector("#searchFilter");
     const cards = Array.from(document.querySelectorAll(".issue"));
     const resultCount = document.querySelector("#resultCount");
     const refreshButton = document.querySelector("#refreshButton");
     let activeRepo = "";
     let minSeverity = 0;
+    let activeChange = "all";
 
     function applyFilters() {
       const query = searchFilter.value.trim().toLowerCase();
@@ -522,8 +543,9 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
       for (const card of cards) {
         const matchesRepo = !activeRepo || card.dataset.repo === activeRepo;
         const matchesSeverity = Number(card.dataset.severity) >= minSeverity;
+        const matchesChange = activeChange === "all" || card.dataset.change === activeChange;
         const matchesQuery = !query || card.dataset.search.includes(query);
-        const visible = matchesRepo && matchesSeverity && matchesQuery;
+        const visible = matchesRepo && matchesSeverity && matchesChange && matchesQuery;
         card.hidden = !visible;
         if (visible) visibleCount += 1;
       }
@@ -543,6 +565,14 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
       button.addEventListener("click", () => {
         minSeverity = Number(button.dataset.severity);
         for (const candidate of severityButtons) candidate.setAttribute("aria-pressed", String(candidate === button));
+        applyFilters();
+      });
+    }
+
+    for (const button of changeButtons) {
+      button.addEventListener("click", () => {
+        activeChange = button.dataset.changeFilter;
+        for (const candidate of changeButtons) candidate.setAttribute("aria-pressed", String(candidate === button));
         applyFilters();
       });
     }

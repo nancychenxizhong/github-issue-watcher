@@ -13,6 +13,11 @@ import type {
   WatchedRepo,
 } from "./types.js";
 
+type ScanRepoResult = {
+  readonly issues: readonly ScoredIssue[];
+  readonly scanStatus: "updated" | "unchanged" | "empty";
+};
+
 function defaultStopAt(config: Config, scanStartedAt: string): string {
   const date = new Date(scanStartedAt);
   date.setDate(date.getDate() - config.lookbackDays);
@@ -59,7 +64,7 @@ async function scanRepo(
   config: Config,
   state: ScanState,
   scanStartedAt: string
-): Promise<readonly ScoredIssue[]> {
+): Promise<ScanRepoResult> {
   const key = repoKey(watched.owner, watched.repo);
   const previous = repoStateOrDefault(state, key);
   const stopAtUpdatedAt =
@@ -74,7 +79,9 @@ async function scanRepo(
   });
 
   const nextIssues: Record<string, StoredIssue> = { ...previous.issues };
-  const previousSeverities = new Map<string, number>();
+  const previousSeverities = new Map(
+    Object.entries(previous.issues).map(([issueNumber, stored]) => [issueNumber, stored.lastSeverity])
+  );
 
   if (!result.notModified) {
     for (const issue of result.issues) {
@@ -94,15 +101,18 @@ async function scanRepo(
     issues: nextIssues,
   };
 
-  return Object.entries(nextIssues).map(([issueNumber, stored]) =>
-    scoreStoredIssue(
-      watched.owner,
-      watched.repo,
-      stored,
-      watched.extraKeywords,
-      previousSeverities.get(issueNumber)
-    )
-  );
+  return {
+    issues: Object.entries(nextIssues).map(([issueNumber, stored]) =>
+      scoreStoredIssue(
+        watched.owner,
+        watched.repo,
+        stored,
+        watched.extraKeywords,
+        previousSeverities.get(issueNumber)
+      )
+    ),
+    scanStatus: result.notModified ? "unchanged" : result.issues.length === 0 ? "empty" : "updated",
+  };
 }
 
 export async function scanWatchlist(
@@ -113,14 +123,16 @@ export async function scanWatchlist(
   const allScored: ScoredIssue[] = [];
   const failures: ScanFailure[] = [];
   const scannedByRepo = new Map<string, number>();
+  const scanStatusByRepo = new Map<string, ScanRepoResult["scanStatus"]>();
 
   for (const watched of config.repos) {
     const label = `${watched.owner}/${watched.repo}`;
 
     try {
-      const scored = await scanRepo(watched, config, state, scanStartedAt);
-      scannedByRepo.set(label, scored.length);
-      allScored.push(...scored);
+      const result = await scanRepo(watched, config, state, scanStartedAt);
+      scannedByRepo.set(label, result.issues.length);
+      scanStatusByRepo.set(label, result.scanStatus);
+      allScored.push(...result.issues);
     } catch (err) {
       failures.push({
         owner: watched.owner,
@@ -152,6 +164,7 @@ export async function scanWatchlist(
       scanned: scannedByRepo.get(key) ?? 0,
       alerts: alertsByRepo.get(key) ?? 0,
       status: failure ? "failed" : "ok",
+      scanStatus: failure ? "failed" : scanStatusByRepo.get(key) ?? "empty",
       ...(failure ? { error: failure.error } : {}),
     };
   });

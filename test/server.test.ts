@@ -10,7 +10,7 @@ const report: ReportResult = {
   totalScanned: 4,
   alertCount: 0,
   failureCount: 0,
-  repositories: [{ owner: "openai", repo: "codex", scanned: 4, alerts: 0, status: "ok" }],
+  repositories: [{ owner: "openai", repo: "codex", scanned: 4, alerts: 0, status: "ok", scanStatus: "updated" }],
   issues: [],
   failures: [],
 };

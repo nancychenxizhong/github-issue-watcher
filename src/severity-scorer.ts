@@ -93,27 +93,109 @@ const WEIGHTS = {
   recencyWindowHours: 48,
 } as const;
 
+type WeightedTerm = {
+  readonly value: string;
+  readonly category: "critical" | "warning";
+};
+
+type TermMatch = WeightedTerm & {
+  readonly start: number;
+  readonly end: number;
+};
+
+function isWordCharacter(value: string | undefined): boolean {
+  return value !== undefined && /[a-z0-9]/.test(value);
+}
+
+function hasTermBoundary(text: string, start: number, end: number): boolean {
+  return !isWordCharacter(text[start - 1]) && !isWordCharacter(text[end]);
+}
+
+function selectTermMatches(text: string, terms: readonly WeightedTerm[]): readonly WeightedTerm[] {
+  const lower = text.toLowerCase();
+  const uniqueTerms = new Map<string, WeightedTerm>();
+
+  for (const term of terms) {
+    const value = term.value.trim().toLowerCase();
+    if (!value) continue;
+
+    const existing = uniqueTerms.get(value);
+    if (!existing || (term.category === "critical" && existing.category === "warning")) {
+      uniqueTerms.set(value, { ...term, value });
+    }
+  }
+
+  const matches: TermMatch[] = [];
+  for (const term of uniqueTerms.values()) {
+    let start = lower.indexOf(term.value);
+    while (start >= 0) {
+      const end = start + term.value.length;
+      if (hasTermBoundary(lower, start, end)) {
+        matches.push({ ...term, start, end });
+      }
+      start = lower.indexOf(term.value, start + 1);
+    }
+  }
+
+  matches.sort((a, b) => {
+    const lengthDelta = b.value.length - a.value.length;
+    if (lengthDelta !== 0) return lengthDelta;
+    if (a.category !== b.category) return a.category === "critical" ? -1 : 1;
+    return a.start - b.start;
+  });
+
+  const selected: TermMatch[] = [];
+  const selectedTerms = new Set<string>();
+  for (const match of matches) {
+    if (selectedTerms.has(match.value)) continue;
+    if (selected.some((other) => match.start < other.end && other.start < match.end)) continue;
+    selected.push(match);
+    selectedTerms.add(match.value);
+  }
+
+  return selected;
+}
+
 function findKeywordHits(text: string, extraKeywords: readonly string[]): {
   critical: string[];
   warning: string[];
 } {
-  const lower = text.toLowerCase();
-  const allCritical = [...CRITICAL_KEYWORDS, ...extraKeywords];
-
-  const critical = allCritical.filter((kw) => lower.includes(kw.toLowerCase()));
-  const warning = WARNING_KEYWORDS.filter((kw) => lower.includes(kw));
-
-  return { critical, warning };
+  const terms: WeightedTerm[] = [
+    ...CRITICAL_KEYWORDS.map((value) => ({ value, category: "critical" as const })),
+    ...extraKeywords.map((value) => ({ value, category: "critical" as const })),
+    ...WARNING_KEYWORDS.map((value) => ({ value, category: "warning" as const })),
+  ];
+  const matches = selectTermMatches(text, terms);
+  return {
+    critical: matches.filter((term) => term.category === "critical").map((term) => term.value),
+    warning: matches.filter((term) => term.category === "warning").map((term) => term.value),
+  };
 }
 
 function findLabelHits(labels: readonly { name: string }[]): {
   critical: string[];
   warning: string[];
 } {
-  const labelNames = labels.map((l) => l.name.toLowerCase());
-  const critical = CRITICAL_LABELS.filter((cl) => labelNames.some((ln) => ln.includes(cl)));
-  const warning = WARNING_LABELS.filter((wl) => labelNames.some((ln) => ln.includes(wl)));
-  return { critical, warning };
+  const terms: WeightedTerm[] = [
+    ...CRITICAL_LABELS.map((value) => ({ value, category: "critical" as const })),
+    ...WARNING_LABELS.map((value) => ({ value, category: "warning" as const })),
+  ];
+  const matchesByValue = new Map<string, WeightedTerm>();
+
+  for (const label of labels) {
+    for (const match of selectTermMatches(label.name, terms)) {
+      const existing = matchesByValue.get(match.value);
+      if (!existing || (match.category === "critical" && existing.category === "warning")) {
+        matchesByValue.set(match.value, match);
+      }
+    }
+  }
+
+  const matches = [...matchesByValue.values()];
+  return {
+    critical: matches.filter((term) => term.category === "critical").map((term) => term.value),
+    warning: matches.filter((term) => term.category === "warning").map((term) => term.value),
+  };
 }
 
 function computeRecencyBoost(createdAt: string): number {
