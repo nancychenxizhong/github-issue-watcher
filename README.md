@@ -269,8 +269,9 @@ The included GitHub Actions workflow is the simplest setup, but the CLI can also
 run from cron, launchd, or any other scheduler.
 
 The workflow restores and saves the `state/` directory using GitHub Actions
-cache. The HTML report is uploaded as an artifact even when alerts or scan
-failures make the job exit non-zero.
+cache. Attention items are emitted as an Actions notice and do not fail the
+scheduled job. Config, network, and scan failures still fail the job, while the
+HTML report and updated state are preserved whenever they were produced.
 
 ### Static HTML report
 

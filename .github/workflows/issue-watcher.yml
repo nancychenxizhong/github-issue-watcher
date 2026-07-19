@@ -27,7 +27,19 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
-      - run: node dist/main.js watchlist.json --format html --output report.html
+      - name: Generate issue report
+        run: |
+          set +e
+          node dist/main.js watchlist.json --format html --output report.html
+          exit_code=$?
+          set -e
+
+          if [ "$exit_code" -eq 1 ]; then
+            echo "::notice title=Issue watcher::Attention items found. Download the report artifact for details."
+            exit 0
+          fi
+
+          exit "$exit_code"
         env:
           GITHUB_TOKEN: ${{ github.token }}
       - run: mkdir -p state
