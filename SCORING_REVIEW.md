@@ -7,8 +7,9 @@ better described as a broad signal detector than a reliable severity model.
 The largest sources of noise are substring keyword matching, overlapping
 keyword weights, and treating community activity as severity.
 
-The report is also not first-time-only. It shows every open issue that remains
-in local state and still scores at or above `minSeverity`.
+The scanner retains every open issue above `minSeverity`, but the default report
+now distinguishes that active set from the much smaller current-scan attention
+queue.
 
 ## Iteration status
 
@@ -20,10 +21,12 @@ this review:
 - previous severity is preserved for unchanged and cached repositories
 - repository summaries distinguish updated, unchanged, empty-window, and failed
   scans
-- the HTML report provides New, Changed, and All lifecycle filters
+- first scans establish a baseline instead of labeling imported history as new
+- the HTML report defaults to meaningful transitions and keeps the complete
+  active set in a secondary, collapsed view
 
-The report still defaults to All active signals, and activity remains part of
-the score. Separating risk from activity is still an open design decision.
+Activity remains part of the score. Separating risk from activity is still an
+open design decision.
 
 ## Current behavior
 
@@ -34,16 +37,17 @@ For each watched repository, the scanner:
 2. Stores fetched issues in `state/issues-state.json`.
 3. Keeps previously stored issues in the repository state.
 4. Re-scores the stored issue set.
-5. Reports stored issues when they are open and meet `minSeverity`.
+5. Keeps stored open issues at or above `minSeverity` in the active set.
+6. Adds only meaningful current-scan transitions to the attention queue.
 
 `lookbackDays` controls the initial activity window and update watermark. It
-does not mean "show only issues from the last N days." There is currently no
-default filter for new issues, changed issues, or issues not shown before.
+does not mean "show only issues from the last N days."
 
 `First seen` means the first time this local state file observed the issue. It
-does not mean the GitHub issue was newly created. `New signal` means the report
-does not have a previous severity value available for comparison; it is not a
-complete lifecycle or acknowledgement model.
+does not mean the GitHub issue was newly created. A `New since baseline`
+attention reason is only assigned after that repository has completed its first
+successful scan. Attention represents a transition found in this scan; it is
+not a complete acknowledgement model.
 
 ## Findings
 
@@ -65,13 +69,14 @@ describes dictionary matches rather than independent contextual evidence.
 
 ### 2. The report is historical and persistent, not first-time-only
 
-Status: lifecycle filters added; default behavior remains historical.
+Status: addressed for the default report view.
 
 The scanner starts from the previous issue map and returns the complete stored
-set. An old open issue remains visible until it is closed or falls below the
-threshold. A newly created state file can therefore make a large number of
-existing GitHub issues appear to be new at once. The HTML report now lets the
-operator narrow this set to New or Changed issues, but All remains the default.
+set. An old open issue remains visible in All active until it is closed or falls
+below the threshold. Initial history establishes a baseline and does not enter
+the attention queue. On later scans, attention is limited to new issues,
+threshold crossings, upward severity-band moves, added risk evidence, and fresh
+activity on already-critical issues.
 
 ### 3. `New signal` can be over-reported
 
@@ -104,23 +109,6 @@ The default threshold is `3`, while the UI calls scores of `8+` Critical,
 enough to enter the report, but it will still be displayed as Notice. The
 keyword's name and the final severity band can therefore appear contradictory.
 
-## Live scan clarification
-
-The current live report returned:
-
-- `failureCount`: `0`
-- `openai/codex`: 526 issue records, 348 alerts
-- `anthropics/anthropic-sdk-python`: 0 issue records, 0 alerts, status `ok`
-- `microsoft/vscode`: 331 issue records, 95 alerts
-- `vercel/next.js`: 15 issue records, 9 alerts
-
-Therefore, the Anthropic scan did not fail. GitHub responded successfully, but
-the scan produced no issue records for that repository in the current one-day
-window after normal filtering. This does not prove the repository has no issues
-overall. The report should expose whether a repository was freshly fetched,
-returned `304 Not Modified`, or returned zero records so that these cases are
-visibly distinct.
-
 ## Recommended next model
 
 Separate three concepts:
@@ -129,17 +117,13 @@ Separate three concepts:
 - **Activity:** reactions, comments, and recent updates, used for ranking.
 - **Lifecycle:** first seen, changed, acknowledged, stale, and resolved.
 
-The default attention view should show new issues, materially changed issues,
-and unresolved high-risk issues. A separate All Active view can preserve the
-full historical list.
+The current attention view now shows new issues, materially changed issues, and
+fresh activity on existing critical issues. A separate All active view preserves
+the full historical list. Persisted acknowledgement and ownership remain future
+work if the report evolves into a durable task queue.
 
 The next scoring revision should also:
 
-- Use word boundaries or phrase-aware matching.
-- Deduplicate overlapping terms and assign explicit phrase priorities.
 - Give repo-specific keywords explicit weights instead of automatically treating
   every extra keyword as critical.
-- Store and compare the previous severity on every report path, including 304
-  responses.
-- Distinguish fetched records, cached records, and unchanged repositories.
 - Consider updated activity separately from issue creation recency.

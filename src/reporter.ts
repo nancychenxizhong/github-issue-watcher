@@ -78,6 +78,10 @@ function formatIssueTerminal(scored: ScoredIssue): string {
 
   lines.push(`  ${color.dim(issue.html_url)}`);
 
+  if (scored.attentionReason) {
+    lines.push(`  ${color.yellow(`attention: ${attentionReasonLabel(scored.attentionReason)}`)}`);
+  }
+
   return lines.join("\n");
 }
 
@@ -102,14 +106,16 @@ export function formatTerminal(report: ReportResult): string {
   }
 
   if (report.alertCount === 0) {
-    lines.push(color.green("All clear. No issues above severity threshold."));
-    lines.push(color.dim(`(scanned ${report.totalScanned} issues across watched repos)`));
+    lines.push(color.green("No new or materially changed issues need attention."));
+    lines.push(
+      color.dim(`(${report.activeCount} active signals; ${report.totalScanned} stored issues scanned)`)
+    );
     return lines.join("\n");
   }
 
   lines.push(
-    `${color.yellow(`${report.alertCount} issue(s)`)} above threshold ` +
-      `(out of ${report.totalScanned} scanned)`
+    `${color.yellow(`${report.alertCount} issue(s)`)} need attention ` +
+      `(${report.activeCount} active signals)`
   );
   lines.push("");
 
@@ -171,13 +177,13 @@ export function formatMarkdown(report: ReportResult): string {
   }
 
   if (report.alertCount === 0) {
-    lines.push("All clear. No issues above severity threshold.");
-    lines.push(`*Scanned ${report.totalScanned} issues across watched repos.*`);
+    lines.push("No new or materially changed issues need attention.");
+    lines.push(`*${report.activeCount} active signals; ${report.totalScanned} stored issues scanned.*`);
     return lines.join("\n");
   }
 
   lines.push(
-    `**${report.alertCount} issue(s)** above threshold (${report.totalScanned} total scanned)`
+    `**${report.alertCount} issue(s)** need attention (${report.activeCount} active signals)`
   );
   lines.push("");
   lines.push("---");
@@ -226,6 +232,37 @@ function issueChangeKind(scored: ScoredIssue): "new" | "changed" | "steady" {
   return delta === 0 ? "steady" : "changed";
 }
 
+function attentionReasonLabel(reason: NonNullable<ScoredIssue["attentionReason"]>): string {
+  switch (reason) {
+    case "new":
+      return "New since baseline";
+    case "threshold-crossed":
+      return "Crossed attention threshold";
+    case "risk-escalated":
+      return "Risk evidence increased";
+    case "critical-updated":
+      return "Critical issue updated";
+  }
+}
+
+type SeverityBucket = "critical" | "warning" | "notice";
+
+function severityBucket(score: number): SeverityBucket {
+  if (score >= 8) return "critical";
+  if (score >= 5) return "warning";
+  return "notice";
+}
+
+function sortIssuesForDisplay(issues: readonly ScoredIssue[]): readonly ScoredIssue[] {
+  const changeOrder = { new: 0, changed: 1, steady: 2 } as const;
+  return [...issues].sort((a, b) => {
+    const changeDelta = changeOrder[issueChangeKind(a)] - changeOrder[issueChangeKind(b)];
+    if (changeDelta !== 0) return changeDelta;
+    if (b.severity !== a.severity) return b.severity - a.severity;
+    return new Date(b.issue.updated_at).getTime() - new Date(a.issue.updated_at).getTime();
+  });
+}
+
 function formatIssueHtml(scored: ScoredIssue): string {
   const { owner, repo, issue, severity, breakdown } = scored;
   const level = severityClass(severity);
@@ -243,13 +280,14 @@ function formatIssueHtml(scored: ScoredIssue): string {
   ].filter(Boolean);
 
   return `
-    <article class="issue ${level}" data-repo="${escapeHtml(`${owner}/${repo}`)}" data-severity="${severity}" data-change="${changeKind}" data-search="${escapeHtml(
+    <article class="issue ${level}" data-repo="${escapeHtml(`${owner}/${repo}`)}" data-severity="${severity}" data-severity-band="${level}" data-change="${changeKind}" data-attention="${scored.attentionReason ? "true" : "false"}" data-reason="${scored.attentionReason ?? ""}" data-search="${escapeHtml(
       `${owner}/${repo} ${issue.title} ${breakdown.keywordHits.join(" ")} ${breakdown.labelHits.join(" ")}`
     )}">
       <div class="issue-layout">
         <div class="issue-body">
           <div class="issue-kicker">
             <span class="severity-label">${severityLabel(severity)}</span>
+            ${scored.attentionReason ? `<span class="attention-label">${escapeHtml(attentionReasonLabel(scored.attentionReason))}</span>` : ""}
             <a class="issue-link" href="${escapeHtml(issue.html_url)}">${escapeHtml(`${owner}/${repo}`)}</a>
             <span class="issue-number">#${issue.number}</span>
           </div>
@@ -269,10 +307,27 @@ function formatIssueHtml(scored: ScoredIssue): string {
         <div class="score-block">
           <span>Score</span>
           <strong>${severity}</strong>
-          <span>${formatSeverityDelta(scored) || "New signal"}</span>
+          <span>${formatSeverityDelta(scored) || (scored.attentionReason === "new" ? "New signal" : "Baseline signal")}</span>
         </div>
       </div>
     </article>`;
+}
+
+function formatSeveritySection(
+  bucket: SeverityBucket,
+  label: string,
+  issues: readonly ScoredIssue[]
+): string {
+  if (issues.length === 0) return "";
+  const sorted = sortIssuesForDisplay(issues).map(formatIssueHtml).join("\n");
+  return `
+    <details class="severity-section ${bucket}" data-severity-section="${bucket}">
+      <summary>
+        <h3>${label}</h3>
+        <span class="section-count" data-section-count>${issues.length} issue${issues.length === 1 ? "" : "s"}</span>
+      </summary>
+      <div class="severity-issues">${sorted}</div>
+    </details>`;
 }
 
 function formatFailureHtml(failure: ScanFailure): string {
@@ -287,18 +342,22 @@ function formatRepoHtml(repo: RepoReportSummary): string {
   const key = `${repo.owner}/${repo.repo}`;
   const status = repo.status === "failed"
     ? "Unavailable"
+    : repo.scanStatus === "baseline"
+      ? `Baseline: ${repo.activeSignals} active`
     : repo.scanStatus === "unchanged"
-      ? `Unchanged: ${repo.alerts} alert${repo.alerts === 1 ? "" : "s"}`
+      ? `Unchanged: ${repo.activeSignals} active`
       : repo.scanStatus === "empty"
         ? "No issues in window"
-        : `${repo.alerts} alert${repo.alerts === 1 ? "" : "s"}`;
+        : repo.alerts > 0
+          ? `${repo.alerts} need attention`
+          : `${repo.activeSignals} active, no changes`;
   return `
     <button class="repo-item ${repo.status === "failed" ? "failed" : ""}" type="button" data-repo="${escapeHtml(key)}" aria-pressed="false">
       <span>
         <span class="repo-name">${escapeHtml(key)}</span>
         <span class="repo-status">${escapeHtml(status)}</span>
       </span>
-      <strong>${repo.status === "failed" ? "!" : repo.alerts || repo.scanned}</strong>
+      <strong>${repo.status === "failed" ? "!" : repo.alerts}</strong>
     </button>`;
 }
 
@@ -307,14 +366,20 @@ export interface HtmlReportOptions {
 }
 
 export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}): string {
-  const criticalCount = report.issues.filter((issue) => issue.severity >= 8).length;
-  const warningCount = report.issues.filter((issue) => issue.severity >= 5 && issue.severity < 8).length;
-  const noticeCount = report.issues.filter((issue) => issue.severity < 5).length;
+  const criticalCount = report.activeIssues.filter((issue) => issue.severity >= 8).length;
+  const warningCount = report.activeIssues.filter((issue) => issue.severity >= 5 && issue.severity < 8).length;
+  const noticeCount = report.activeIssues.filter((issue) => issue.severity < 5).length;
   const activeHeading = report.alertCount === 0
-    ? "No active signals"
-    : `${report.alertCount} signal${report.alertCount === 1 ? "" : "s"} need attention`;
+    ? "No changes need attention"
+    : `${report.alertCount} change${report.alertCount === 1 ? "" : "s"} need attention`;
   const repoItems = report.repositories.map(formatRepoHtml).join("\n");
-  const issues = report.issues.map(formatIssueHtml).join("\n");
+  const sections = ([("critical" as const), ("warning" as const), ("notice" as const)]).map((bucket) =>
+    formatSeveritySection(
+      bucket,
+      bucket[0].toUpperCase() + bucket.slice(1),
+      report.activeIssues.filter((issue) => severityBucket(issue.severity) === bucket)
+    )
+  ).join("\n");
   const failures = report.failures.map(formatFailureHtml).join("\n");
   const embedded = JSON.stringify(report).replaceAll("<", "\\u003c");
   const liveControls = options.liveEndpoint
@@ -378,8 +443,8 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
     .repo-name, .repo-status { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .repo-name { font-size: 13px; font-weight: 700; }
     .repo-status { margin-top: 3px; color: var(--muted); font-size: 11px; }
-    .notice { display: grid; gap: 6px; padding: 14px 16px; margin-bottom: 24px; border: 1px solid #e4c9c1; border-left: 3px solid var(--clay); border-radius: 6px; background: var(--clay-soft); }
-    .notice h2 { margin: 0; font-size: 15px; }
+    .scan-failure-notice { display: grid; gap: 6px; padding: 14px 16px; margin-bottom: 24px; border: 1px solid #e4c9c1; border-left: 3px solid var(--clay); border-radius: 6px; background: var(--clay-soft); }
+    .scan-failure-notice h2 { margin: 0; font-size: 15px; }
     .failure-item { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 13px; }
     .failure-item strong { color: var(--ink); }
     .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px; margin-bottom: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
@@ -395,25 +460,37 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
     .feed-header { display: flex; justify-content: space-between; gap: 20px; align-items: end; margin-bottom: 14px; }
     .feed-header h2 { margin: 0; font-size: 22px; }
     .feed-header p { margin: 0; color: var(--muted); font-size: 13px; }
-    .issue { padding: 21px 22px; margin-bottom: 14px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 7px; background: var(--surface); box-shadow: 0 1px 2px rgb(32 33 36 / 4%); }
+    .severity-section { margin-bottom: 28px; }
+    .severity-section > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 0 0 10px 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--neutral); color: var(--ink); cursor: pointer; list-style: none; }
+    .severity-section > summary::-webkit-details-marker { display: none; }
+    .severity-section > summary::after { content: "+"; color: var(--muted); font-size: 18px; line-height: 1; }
+    .severity-section[open] > summary::after { content: "-"; }
+    .severity-section.critical > summary { border-left-color: var(--clay); }
+    .severity-section.warning > summary { border-left-color: var(--warm); }
+    .severity-section h3 { margin: 0; font-size: 16px; line-height: 1.2; }
+    .severity-section .section-count { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .severity-section.critical > summary h3 { color: var(--clay); }
+    .severity-section.warning > summary h3 { color: var(--warm); }
+    .issue { padding: 19px 20px; margin-bottom: 12px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 7px; background: var(--surface); box-shadow: 0 1px 2px rgb(32 33 36 / 4%); }
     .issue.critical { border-left-color: var(--clay); }
     .issue.warning { border-left-color: var(--warm); }
     .issue.notice { border-left-color: var(--neutral); }
     .issue-layout { display: grid; grid-template-columns: minmax(0, 1fr) 94px; gap: 24px; }
     .issue-kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
     .severity-label { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+    .attention-label { padding-left: 7px; border-left: 1px solid var(--line); color: var(--ink); font-size: 11px; font-weight: 700; }
     .critical .severity-label, .critical .score-block strong { color: var(--clay); }
     .warning .severity-label, .warning .score-block strong { color: var(--warm); }
     .notice .severity-label, .notice .score-block strong { color: var(--neutral); }
     .issue-link { color: var(--ink); font-weight: 700; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
     .issue-number { color: var(--muted); }
-    .issue h3 { margin: 8px 0 0; font-size: 18px; line-height: 1.32; letter-spacing: 0; }
+    .issue h3 { margin: 7px 0 0; font-size: 17px; line-height: 1.32; letter-spacing: 0; }
     .issue-explanation { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; color: var(--muted); font-size: 13px; }
     .explanation-label { color: var(--ink); font-weight: 700; }
     .signals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
     .signal { padding: 4px 7px; border: 1px solid var(--line); border-radius: 4px; background: #faf9f5; color: var(--ink); font-size: 12px; }
     .signal.label { background: var(--neutral-soft); }
-    .issue-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0 0; padding-top: 13px; border-top: 1px solid var(--line); }
+    .issue-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0 0; padding-top: 13px; border-top: 1px solid var(--line); }
     .issue-meta div { min-width: 0; }
     dt { color: var(--muted); font-size: 11px; }
     dd { margin: 4px 0 0; color: var(--ink); font-size: 13px; font-weight: 700; }
@@ -465,7 +542,7 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
       <div>
         <p class="eyebrow">GitHub issue watcher</p>
         <h1>${escapeHtml(activeHeading)}</h1>
-        <p>Scanned ${report.totalScanned} issues across ${report.repositories.length} watched repositories. Generated ${escapeHtml(report.generatedAt)}.</p>
+        <p>Compared this scan with the saved baseline across ${report.repositories.length} watched repositories. Generated ${escapeHtml(report.generatedAt)}.</p>
       </div>
       <div class="run-state ${report.failureCount > 0 ? "partial" : ""}">
         <span class="state-mark" aria-hidden="true"></span>
@@ -475,8 +552,8 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
     </section>
 
     <section class="summary" aria-label="Report summary">
-      <div class="summary-item active"><span>Active signals</span><strong>${report.alertCount}</strong><small>${criticalCount} critical, ${warningCount} warning</small></div>
-      <div class="summary-item"><span>Issues scanned</span><strong>${report.totalScanned}</strong><small>${noticeCount} lower-severity signal${noticeCount === 1 ? "" : "s"} shown</small></div>
+      <div class="summary-item active"><span>Needs attention</span><strong>${report.alertCount}</strong><small>New or materially changed this scan</small></div>
+      <div class="summary-item"><span>Active signals</span><strong>${report.activeCount}</strong><small>${criticalCount} critical, ${warningCount} warning, ${noticeCount} notice</small></div>
       <div class="summary-item"><span>Repositories</span><strong>${report.repositories.length}</strong><small>${report.failureCount} unavailable</small></div>
       <div class="summary-item"><span>Lookback</span><strong>${report.lookbackDays}d</strong><small>Since the last scan window</small></div>
     </section>
@@ -487,7 +564,7 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
         <h2>Repositories</h2>
         <div class="repo-list">
           <button class="repo-item" type="button" data-repo="" aria-pressed="true">
-            <span><span class="repo-name">All repositories</span><span class="repo-status">Every active signal</span></span>
+            <span><span class="repo-name">All repositories</span><span class="repo-status">Changes requiring review</span></span>
             <strong>${report.alertCount}</strong>
           </button>
           ${repoItems}
@@ -495,30 +572,31 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
       </aside>
 
       <section class="feed" aria-label="Issue signals">
-        ${failures ? `<section class="notice" aria-label="Scan failures"><h2>${report.failureCount} repository scan${report.failureCount === 1 ? "" : "s"} unavailable</h2>${failures}</section>` : ""}
+        ${failures ? `<section class="scan-failure-notice" aria-label="Scan failures"><h2>${report.failureCount} repository scan${report.failureCount === 1 ? "" : "s"} unavailable</h2>${failures}</section>` : ""}
 
         <section class="toolbar" aria-label="Filters">
-          <div class="filter-group" role="group" aria-label="Filter by severity">
-            <button class="filter-button" type="button" data-severity="0" aria-pressed="true">All</button>
-            <button class="filter-button" type="button" data-severity="8" aria-pressed="false">Critical</button>
-            <button class="filter-button" type="button" data-severity="5" aria-pressed="false">Warning</button>
+          <div class="filter-group" role="group" aria-label="Choose report view">
+            <button class="filter-button" type="button" data-view="attention" aria-pressed="true">Attention</button>
+            <button class="filter-button" type="button" data-view="active" aria-pressed="false">All active</button>
           </div>
-          <div class="filter-group" role="group" aria-label="Filter by change">
-            <button class="filter-button" type="button" data-change-filter="all" aria-pressed="true">All</button>
-            <button class="filter-button" type="button" data-change-filter="new" aria-pressed="false">New</button>
-            <button class="filter-button" type="button" data-change-filter="changed" aria-pressed="false">Changed</button>
+          <div class="filter-group" role="group" aria-label="Filter by severity">
+            <button class="filter-button" type="button" data-severity-filter="all" aria-pressed="true">All</button>
+            <button class="filter-button" type="button" data-severity-filter="critical" aria-pressed="false">Critical</button>
+            <button class="filter-button" type="button" data-severity-filter="warning" aria-pressed="false">Warning</button>
+            <button class="filter-button" type="button" data-severity-filter="notice" aria-pressed="false">Notice</button>
           </div>
           <label class="search-field" for="searchFilter"><span>Search</span><input id="searchFilter" type="search" placeholder="Title, repo, keyword, or label"></label>
-          <span class="result-count" id="resultCount">Showing ${report.alertCount} signal${report.alertCount === 1 ? "" : "s"}</span>
+          <span class="result-count" id="resultCount">Showing ${report.alertCount} change${report.alertCount === 1 ? "" : "s"}</span>
         </section>
 
         <div class="feed-header">
-          <div><p class="section-kicker">Prioritized signals</p><h2>Open issues above your threshold</h2></div>
-          <p>${report.alertCount === 0 ? "The watchlist is quiet." : "Ranked by severity and activity."}</p>
+          <div><p class="section-kicker">Review queue</p><h2 id="feedTitle">Changes since the saved baseline</h2></div>
+          <p id="feedContext">New issues, risk escalations, and active critical issues.</p>
         </div>
 
         <section id="issues">
-          ${issues || `<div class="empty"><h2>All clear</h2><p>No issues crossed the configured severity threshold.</p></div>`}
+          ${sections || `<div class="empty"><h2>No active signals</h2><p>No open issues crossed the configured severity threshold.</p></div>`}
+          ${sections ? `<div id="filteredEmpty" class="empty" hidden><h2>No changes need review</h2><p>The active set is available under All active.</p></div>` : ""}
         </section>
       </section>
     </div>
@@ -526,31 +604,53 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
   <script id="report-data" type="application/json">${embedded}</script>
   <script>
     const repoButtons = Array.from(document.querySelectorAll(".repo-item"));
-    const severityButtons = Array.from(document.querySelectorAll(".filter-button[data-severity]"));
-    const changeButtons = Array.from(document.querySelectorAll(".filter-button[data-change-filter]"));
+    const viewButtons = Array.from(document.querySelectorAll(".filter-button[data-view]"));
+    const severityButtons = Array.from(document.querySelectorAll(".filter-button[data-severity-filter]"));
+    const severitySections = Array.from(document.querySelectorAll(".severity-section"));
     const searchFilter = document.querySelector("#searchFilter");
     const cards = Array.from(document.querySelectorAll(".issue"));
     const resultCount = document.querySelector("#resultCount");
+    const filteredEmpty = document.querySelector("#filteredEmpty");
+    const feedTitle = document.querySelector("#feedTitle");
+    const feedContext = document.querySelector("#feedContext");
     const refreshButton = document.querySelector("#refreshButton");
     let activeRepo = "";
-    let minSeverity = 0;
-    let activeChange = "all";
+    let activeView = "attention";
+    let activeSeverity = "all";
 
     function applyFilters() {
       const query = searchFilter.value.trim().toLowerCase();
       let visibleCount = 0;
+      const visibleBySection = new Map();
 
       for (const card of cards) {
         const matchesRepo = !activeRepo || card.dataset.repo === activeRepo;
-        const matchesSeverity = Number(card.dataset.severity) >= minSeverity;
-        const matchesChange = activeChange === "all" || card.dataset.change === activeChange;
+        const matchesSeverity = activeSeverity === "all" || card.dataset.severityBand === activeSeverity;
+        const matchesView = activeView === "active" || card.dataset.attention === "true";
         const matchesQuery = !query || card.dataset.search.includes(query);
-        const visible = matchesRepo && matchesSeverity && matchesChange && matchesQuery;
+        const visible = matchesRepo && matchesSeverity && matchesView && matchesQuery;
         card.hidden = !visible;
-        if (visible) visibleCount += 1;
+        if (visible) {
+          visibleCount += 1;
+          const section = card.closest(".severity-section");
+          if (section) visibleBySection.set(section, (visibleBySection.get(section) || 0) + 1);
+        }
       }
 
-      resultCount.textContent = "Showing " + visibleCount + " signal" + (visibleCount === 1 ? "" : "s");
+      for (const section of severitySections) {
+        const sectionCount = visibleBySection.get(section) || 0;
+        const countLabel = section.querySelector("[data-section-count]");
+        if (countLabel) countLabel.textContent = sectionCount + " issue" + (sectionCount === 1 ? "" : "s");
+        section.hidden = sectionCount === 0;
+        section.open = activeView === "attention" && sectionCount > 0;
+      }
+
+      resultCount.textContent = "Showing " + visibleCount + (activeView === "attention" ? " change" : " active signal") + (visibleCount === 1 ? "" : "s");
+      feedTitle.textContent = activeView === "attention" ? "Changes since the saved baseline" : "All active signals";
+      feedContext.textContent = activeView === "attention"
+        ? "New issues, risk escalations, and active critical issues."
+        : "The complete stored set, grouped and collapsed by severity.";
+      if (filteredEmpty) filteredEmpty.hidden = visibleCount !== 0;
     }
 
     for (const button of repoButtons) {
@@ -563,21 +663,22 @@ export function formatHtml(report: ReportResult, options: HtmlReportOptions = {}
 
     for (const button of severityButtons) {
       button.addEventListener("click", () => {
-        minSeverity = Number(button.dataset.severity);
+        activeSeverity = button.dataset.severityFilter;
         for (const candidate of severityButtons) candidate.setAttribute("aria-pressed", String(candidate === button));
         applyFilters();
       });
     }
 
-    for (const button of changeButtons) {
+    for (const button of viewButtons) {
       button.addEventListener("click", () => {
-        activeChange = button.dataset.changeFilter;
-        for (const candidate of changeButtons) candidate.setAttribute("aria-pressed", String(candidate === button));
+        activeView = button.dataset.view;
+        for (const candidate of viewButtons) candidate.setAttribute("aria-pressed", String(candidate === button));
         applyFilters();
       });
     }
 
     searchFilter.addEventListener("input", applyFilters);
+    applyFilters();
 
     if (refreshButton) {
       refreshButton.addEventListener("click", async () => {

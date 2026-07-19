@@ -87,18 +87,20 @@ The local scan state is written to `state/issues-state.json` by default. Pass
 To run a real scan and open the report in a browser:
 
 ```bash
-export GITHUB_TOKEN=ghp_your_token_here
 npm run serve
 ```
+
+Public repositories do not require a token. Set `GITHUB_TOKEN` when you want the
+higher authenticated rate limit.
 
 Open [http://127.0.0.1:8765/](http://127.0.0.1:8765/). The first page load
 performs a scan. The result is held in memory for subsequent page loads, while
 the existing state file continues to provide ETag and updated-at caching. Use
 the report's **Scan now** control to force a fresh scan.
 
-The repository rail distinguishes a fresh update, an unchanged ETag response,
-an empty scan window, and an unavailable repository. The issue toolbar also
-supports filtering by severity and by lifecycle: New, Changed, or All.
+The repository rail distinguishes a baseline, a fresh update, an unchanged ETag
+response, an empty scan window, and an unavailable repository. The report opens
+on the focused Attention view; All active exposes the complete stored signal set.
 
 The server exposes these local endpoints:
 
@@ -130,7 +132,7 @@ The focused tests cover:
 - persisted scan state load/save behavior
 - live report server routing and scan caching
 - bounded scoring evidence and overlapping keyword suppression
-- cached severity comparisons and New/Changed issue filtering
+- baseline suppression and meaningful attention-transition classification
 
 Pull requests also run the `ci` workflow, which checks:
 
@@ -234,6 +236,25 @@ evidence.
 The default threshold (`minSeverity: 3`) catches a single critical keyword or
 label match. Raise it if you're watching noisy repos.
 
+## Attention model
+
+The active signal set and the attention queue are deliberately different:
+
+- The first successful scan of each repository establishes a baseline. Existing
+  issues are indexed but are not reported as newly discovered alerts.
+- A later scan requests attention for a genuinely new issue, a threshold
+  crossing, a move into a higher severity band, newly added keyword or label
+  evidence, or fresh activity on an already-critical issue.
+- Reaction and comment changes inside the same non-critical severity band do not
+  create attention items.
+- The CLI exits with code 1 only when the attention queue is non-empty. The HTML
+  report keeps All active available as a secondary, collapsed view.
+
+Attention is scoped to meaningful transitions found in the current scan. It is
+not an acknowledgement or ticket-assignment system. Activity still contributes
+to the severity score, so an activity increase can trigger attention when it
+crosses a threshold or severity band.
+
 ## Other scheduling options
 
 The included GitHub Actions workflow is the simplest setup, but the CLI can also
@@ -283,8 +304,8 @@ fi
 
 | Code | Meaning                               |
 |------|---------------------------------------|
-| 0    | All clear, no issues above threshold  |
-| 1    | Alerts found, issues above threshold  |
+| 0    | Scan succeeded with no attention transitions |
+| 1    | New or materially changed issues need attention |
 | 2    | Fatal error, config or network        |
 
 ## License

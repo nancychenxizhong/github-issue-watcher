@@ -71,7 +71,14 @@ export interface ScoredIssue {
   readonly firstSeenAt?: string;
   readonly lastSeenAt?: string;
   readonly previousSeverity?: number;
+  readonly attentionReason?: AttentionReason;
 }
+
+export type AttentionReason =
+  | "new"
+  | "threshold-crossed"
+  | "risk-escalated"
+  | "critical-updated";
 
 // --- Report output ---
 
@@ -79,10 +86,16 @@ export interface ReportResult {
   readonly generatedAt: string;
   readonly lookbackDays: number;
   readonly totalScanned: number;
+  /** Open issues currently at or above the configured score threshold. */
+  readonly activeCount: number;
+  /** Issues requiring review because of a meaningful transition in this scan. */
   readonly alertCount: number;
   readonly failureCount: number;
   readonly repositories: readonly RepoReportSummary[];
+  /** Attention queue for this scan. */
   readonly issues: readonly ScoredIssue[];
+  /** Complete active set, including steady baseline issues. */
+  readonly activeIssues: readonly ScoredIssue[];
   readonly failures: readonly ScanFailure[];
 }
 
@@ -90,9 +103,10 @@ export interface RepoReportSummary {
   readonly owner: string;
   readonly repo: string;
   readonly scanned: number;
+  readonly activeSignals: number;
   readonly alerts: number;
   readonly status: "ok" | "failed";
-  readonly scanStatus: "updated" | "unchanged" | "empty" | "failed";
+  readonly scanStatus: "baseline" | "updated" | "unchanged" | "empty" | "failed";
   readonly error?: string;
 }
 
