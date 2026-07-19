@@ -4,8 +4,9 @@
 
 The current scorer is understandable and deterministic, but it is currently
 better described as a broad signal detector than a reliable severity model.
-The largest sources of noise are substring keyword matching, overlapping
-keyword weights, and treating community activity as severity.
+Bounded matching and overlap suppression address the clearest mechanical false
+positives. The main remaining sources of noise are context-free keyword matches
+and treating community activity as severity.
 
 The scanner retains every open issue above `minSeverity`, but the default report
 now distinguishes that active set from the much smaller current-scan attention
@@ -19,8 +20,8 @@ this review:
 - keyword and label matches now use term boundaries and suppress overlapping
   evidence
 - previous severity is preserved for unchanged and cached repositories
-- repository summaries distinguish updated, unchanged, empty-window, and failed
-  scans
+- repository summaries distinguish baseline, updated, unchanged, empty-window,
+  and failed scans
 - first scans establish a baseline instead of labeling imported history as new
 - the HTML report defaults to meaningful transitions and keeps the complete
   active set in a secondary, collapsed view
