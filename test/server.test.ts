@@ -8,10 +8,12 @@ const report: ReportResult = {
   generatedAt: "2026-07-12T00:00:00.000Z",
   lookbackDays: 1,
   totalScanned: 4,
+  activeCount: 0,
   alertCount: 0,
   failureCount: 0,
-  repositories: [{ owner: "openai", repo: "codex", scanned: 4, alerts: 0, status: "ok" }],
+  repositories: [{ owner: "openai", repo: "codex", scanned: 4, activeSignals: 0, alerts: 0, status: "ok", scanStatus: "updated" }],
   issues: [],
+  activeIssues: [],
   failures: [],
 };
 
